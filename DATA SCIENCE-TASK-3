@@ -1,0 +1,117 @@
+import os
+from pathlib import Path
+import joblib
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    accuracy_score, roc_auc_score, classification_report,
+    confusion_matrix, RocCurveDisplay
+)
+
+# Set up output directories
+ROOT_DIR = Path(__file__).resolve().parents[2]
+ARTIFACTS_DIR = ROOT_DIR / "artifacts"
+PLOTS_DIR = ARTIFACTS_DIR / "plots"
+ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+
+FEATURE_NAMES = None
+
+def build_pipeline():
+    pipe = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+        ("clf", RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1))
+    ])
+    return pipe
+
+def plot_confusion_matrix(y_true, y_pred):
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Benign', 'Malignant'], yticklabels=['Benign', 'Malignant'])
+    plt.title("Confusion Matrix")
+    plt.xlabel("Predicted Label")
+    plt.ylabel("True Label")
+    plt.tight_layout()
+    plot_path = PLOTS_DIR / "confusion_matrix.png"
+    plt.savefig(plot_path)
+    plt.close()
+    print(f"Saved confusion matrix to: {plot_path}")
+
+def plot_roc_curve(y_true, y_probs):
+    RocCurveDisplay.from_predictions(y_true, y_probs)
+    plt.title("ROC Curve")
+    plt.tight_layout()
+    plot_path = PLOTS_DIR / "roc_curve.png"
+    plt.savefig(plot_path)
+    plt.close()
+    print(f"Saved ROC curve to: {plot_path}")
+
+def plot_feature_importance(model, feature_names):
+    importances = model.named_steps["clf"].feature_importances_
+    indices = np.argsort(importances)[::-1]
+    sorted_features = [feature_names[i] for i in indices]
+
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x=importances[indices], y=sorted_features, palette="viridis")
+    plt.title("Feature Importances")
+    plt.xlabel("Importance")
+    plt.ylabel("Feature")
+    plt.tight_layout()
+    plot_path = PLOTS_DIR / "feature_importances.png"
+    plt.savefig(plot_path)
+    plt.close()
+    print(f"Saved feature importance plot to: {plot_path}")
+
+def train_and_save():
+    data = load_breast_cancer()
+    X = pd.DataFrame(data.data, columns=data.feature_names)
+    y = pd.Series(data.target)
+
+    global FEATURE_NAMES
+    FEATURE_NAMES = list(X.columns)
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    pipeline = build_pipeline()
+    pipeline.fit(X_train, y_train)
+
+    preds = pipeline.predict(X_test)
+    probs = pipeline.predict_proba(X_test)[:, 1]
+
+    acc = accuracy_score(y_test, preds)
+    auc = roc_auc_score(y_test, probs)
+
+    print("✅ Training complete")
+    print(f"🎯 Test Accuracy: {acc:.4f}")
+    print(f"🧠 Test ROC AUC: {auc:.4f}")
+    print("\n📊 Classification Report:\n", classification_report(y_test, preds))
+
+    # Save model artifact
+    artifact = {
+        "pipeline": pipeline,
+        "feature_names": FEATURE_NAMES,
+    }
+    model_path = ARTIFACTS_DIR / "model.joblib"
+    joblib.dump(artifact, model_path)
+    print(f"📦 Saved model to: {model_path}")
+
+    # Save plots
+    plot_confusion_matrix(y_test, preds)
+    plot_roc_curve(y_test, probs)
+    plot_feature_importance(pipeline, FEATURE_NAMES)
+
+
+if __name__ == '__main__':
+    train_and_save()
